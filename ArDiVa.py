@@ -50,13 +50,17 @@ def digDictVals (keyseq, candidate):
 		for cpath in paths:
 			if isinstance (ckey, RE_TYPE):
 				rekey = []
-				for subkey in cpath.keys():
-					#print subkey
-					if ckey.search(subkey) is not None:
-						rekey.append (subkey)
 
-				#print rekey
+				try:
+					for subkey in cpath.keys():
+						#print subkey
+						if ckey.search(subkey) is not None:
+							rekey.append (subkey)
+				except AttributeError:
+					#no longer in a dictionary
+					pass
 				pkey = tuple(rekey)
+
 			else:
 				pkey = ckey
 
@@ -122,19 +126,29 @@ def applyKeydesc (keydesc, candidate):
 		if isinstance(keyrep, list):
 			values += digDictVals(keyrep, candidate)
 
-		elif isinstance(keyrep, RE_TYPE):
-			rekey = []
-			for subkey in candidate.keys():
-				if keyrep.search(subkey) is not None:
-					rekey.append (subkey)
 
-			# working on the parsed keys from the regexpkey
-			for pkey in rekey:
-				values.append(candidate[pkey])
+		#TODO: avoid exception in case the dictionary ends BEFORE the hierarchy shown in our key list
+
+		elif isinstance(keyrep, RE_TYPE):
+			try:
+				rekey = []
+				for subkey in candidate.keys():
+					if keyrep.search(subkey) is not None:
+						rekey.append (subkey)
+				# working on the parsed keys from the regexpkey
+				for pkey in rekey:
+					values.append(candidate[pkey])
+			except AttributeError:
+				#not in a dictionary anymore
+				pass
 
 		else:
-			if candidate.has_key(keyrep):
-				values.append(candidate[keyrep])
+			try:
+				if candidate.has_key(keyrep):
+					values.append(candidate[keyrep])
+			except AttributeError:
+				# not in a dictionary anymore
+				pass
 
 	return tuple(values)
 
@@ -299,12 +313,6 @@ class Model (dict):
 		return True
 
 
-
-
-
-
-
-
 class Check:
 	"""
 	A single check in the list of checks for a validation step
@@ -370,6 +378,7 @@ class Validation:
 		:param candidate: the candidate dictionary from which we extract the values for validation
 		:return: boolean True/False
 		"""
+
 
 		values = applyKeydesc(self.keydesc, candidate)
 		resultsbykey = []
