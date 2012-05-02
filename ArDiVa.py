@@ -170,6 +170,15 @@ class Validator:
 		self.process = checklist_candidate
 
 
+	def getLog(self):
+		log = []
+		if self.model is not None:
+			log += self.model.log
+		if self.process is not None:
+			log += self.process.log
+
+		return log
+
 class Model (dict):
 	"""
 	The Model class defines a dictionary template that can be used to perform a first step of validation with varying levels of strictness
@@ -188,14 +197,18 @@ class Model (dict):
 
 	def __init__ (self, defaultrule=None):
 		dict.__init__ (self)
-		if defaultrule in self.VAL_CODES:
-			self.default = defaultrule
+		self.setDefaultRule(defaultrule)
+
+	def setDefaultRule (self, newdefault):
+		if newdefault in self.VAL_CODES:
+			self.default = newdefault
 		else:
 			self.default = None
 
+
 	def evaluateCompliance (self, candidate, descriptor, strictness, override):
 		"""
-		Determines if the candidate value conforms to a value/condition defined by the specimen parameter
+		Determines if the candidate value conforms to a value/condition defined by the descriptor parameter
 		:param candidate:
 		:param descriptor:
 		:param strictness:
@@ -232,10 +245,13 @@ class Model (dict):
 
 	def validateCandidate (self, candidate, validateas = VAL_STRICT, override = False):
 		"""
+		Validates the candidate against the model. This is the function that performs the full validation, while evaluateCompliance only checks on a single value/condition
 		:param candidate:
 		:param validateas: defaults to the highest applicable level of check. If the model includes a regexp, the lowest value we can have is SUBSET. If the value provided is higher we issue a warning
 		:return: True/False
 		"""
+
+		self.log = []
 
 		try:
 			if override is False:
@@ -265,6 +281,7 @@ class Model (dict):
 			keys_candidate.sort()
 
 			if keys_candidate != keys_model:
+				self.log.append("Model validation (strict) error: keys do not match")
 				return False
 			else:
 				testable = keys_candidate
@@ -273,6 +290,7 @@ class Model (dict):
 			#todo: implement SUPERSET validation
 			for ckey in keys_model:
 				if ckey not in keys_candidate:
+					self.log.append("Model validation (superset) error: key %s not in candidate" % ckey)
 					return False
 				else:
 					testable.append(ckey)
@@ -281,6 +299,7 @@ class Model (dict):
 			#todo: implement SUBSET validation
 			for ckey in keys_candidate:
 				if ckey not in keys_model:
+					self.log.append("Model validation (subset) error: key %s not in model" % ckey)
 					return False
 				else:
 					testable.append(ckey)
@@ -291,6 +310,8 @@ class Model (dict):
 					testable.append(ckey)
 
 			if len(testable) == 0:
+				self.log.append("Model validation (loose) error: no common keys")
+
 				return False
 
 
@@ -308,7 +329,9 @@ class Model (dict):
 						passed = True
 
 			if passed is False:
+				self.log.append("Model validation error on key %s" % ckey)
 				return False
+
 
 		return True
 
@@ -346,11 +369,14 @@ class Validation:
 	"""
 
 
-	def __init__ (self, keydesc, checkseq=None, seqbycheck=all, seqbykey=all):
+	def __init__ (self, keydesc, checkseq=None, seqbycheck=all, seqbykey=all, message=None):
 		self.keydesc = keydesc
 		self.checks = []
 		self.seqbycheck = seqbycheck
 		self.seqbykey = self.seqbykey
+
+
+
 
 		if checkseq is not None:
 			for ccheck in checkseq:
@@ -372,13 +398,13 @@ class Validation:
 		self.checks.append(Check(funcdesc, expected, args, kwargs))
 
 
-	def applyTo (self, candidate):
+	def applyTo (self, candidate, logto=None):
 		"""
 		Applies a validation to the candidate dict after getting the values list according to the keydesc
 		:param candidate: the candidate dictionary from which we extract the values for validation
+		:param logto: log listing to which the eventual error message is appended
 		:return: boolean True/False
 		"""
-
 
 		values = applyKeydesc(self.keydesc, candidate)
 		resultsbykey = []
@@ -387,7 +413,13 @@ class Validation:
 			for test in self.checks:
 				resultsbycheck.append (test.performCheck(testable))
 			resultsbykey.append (self.seqbycheck(resultsbycheck))
-		return self.seqbykey(resultsbykey)
+
+		output = self.seqbykey(resultsbykey)
+		if output is False:
+			if logto is not None:
+				logto.append(self.message)
+		return output
+
 
 
 class Process:
@@ -397,10 +429,9 @@ class Process:
 
 	def __init__ (self, validations=None):
 		self.validations = []
-
+		self.log = []
 		if validations is not None:
 			self.importProcessScript(validations)
-
 
 	def importProcessScript(self, validations_list):
 		"""
@@ -411,17 +442,21 @@ class Process:
 		for step in validations_list:
 			self.appendValidation (*step)
 
-	def appendValidation (self, keydesc, checkseq=None, seqbycheck=all, seqbykey=all):
+	def appendValidation (self, keydesc, checkseq=None, seqbycheck=all, seqbykey=all, message=None):
 		"""
 		Adds a single validation step at the end of the Process.
 		:param keydesc: list of keys
 		:param checkseq: a list of checks to be performed on the selected keydesc. Can be None (used for "soft" init in complex script parsing), in that case the validation step will be skipped as True automatically
 		:param seqbycheck: the any/all clause applied when combining the results of different functions on the same key
 		:param seqbykey: the any/all clause applied when combining the results of a check on different keys
+		:param message: the error message to be added to the log if the validation meets an error
 		:return:
 		"""
 
-		self.validations.append(Validation(keydesc, checkseq, seqbycheck, seqbykey))
+		if message is None:
+			message = "Validation error on descriptor %s", keydesc
+
+		self.validations.append(Validation(keydesc, checkseq, seqbycheck, seqbykey, message))
 
 
 	def performValidations (self, candidate):
@@ -430,24 +465,21 @@ class Process:
 		:param candidate: the candidate dictionary we want to validate
 		:return: boolean
 		"""
-
+		self.log = []
 		for testunit in self.validations:
-			if testunit.applyTo(candidate) is False:
+			if testunit.applyTo(candidate, self.log) is False:
 				return False
-
 		return True
-
-
 
 	def performValidationsAll (self, candidate):
 		"""
-	   Walks the full list of validations from first to last even if one or more validations fail.
-	   :param candidate: the candidate dictionary we want to validate
-	   :return: List of True,False, None for every validation in the Validations list. True for success, False for failure, None if the keydescriptor cannot be applied.
+		Walks the full list of validations from first to last even if one or more validations fail.
+		:param candidate: the candidate dictionary we want to validate
+		:return: List of True,False, None for every validation in the Validations list. True for success, False for failure, None if the keydescriptor cannot be applied.
 	   """
 
+		self.log = []
 		results = []
 		for testunit in self.validations:
-			results.append(testunit.applyTo(candidate))
-
+			results.append(testunit.applyTo(candidate, self.log))
 		return results
