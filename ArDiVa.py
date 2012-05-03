@@ -19,6 +19,39 @@ CHKFIELD_EXPECT = 1
 CHKFIELD_ARGS = 2
 CHKFIELD_KWARGS = 3
 
+def validateFieldIteratively (fielddata, validator):
+	"""
+	Validates the field as a list of objects considered appropriate by action
+	:param fielddata:
+	:param validator: specific function to be applied to all the objects in the iterable
+	:return: bool
+	"""
+
+	if not isinstance (fielddata, (list, tuple)):
+		return False
+
+	for element in fielddata:
+		if not validator(element):
+			return False
+
+	return True
+
+def validateFieldAsListOf (fielddata, *reftype):
+	"""
+	Validates the field as a listing of istances of reftype
+	:param fielddata:
+	:param reftype:
+	:return: bool
+	"""
+
+	if not isinstance (fielddata, (list, tuple)):
+		return False
+
+	if not any ([isinstance(element, reftype) for element in fielddata]):
+		return False
+
+	return True
+
 
 # static since we want to access this from both the Model and Process validations
 def digDictVals (keyseq, candidate):
@@ -54,7 +87,7 @@ def digDictVals (keyseq, candidate):
 				try:
 					for subkey in cpath.keys():
 						#print subkey
-						if ckey.search(subkey) is not None:
+						if ckey.match(subkey):
 							rekey.append (subkey)
 				except AttributeError:
 					#no longer in a dictionary
@@ -133,7 +166,7 @@ def applyKeydesc (keydesc, candidate):
 			try:
 				rekey = []
 				for subkey in candidate.keys():
-					if keyrep.search(subkey) is not None:
+					if keyrep.match(subkey):
 						rekey.append (subkey)
 				# working on the parsed keys from the regexpkey
 				for pkey in rekey:
@@ -375,8 +408,10 @@ class Validation:
 		self.seqbycheck = seqbycheck
 		self.seqbykey = self.seqbykey
 
-
-
+		if message is None:
+			message = ("Validation error in key descriptor %s" % keydesc)
+		else:
+			self.message = message
 
 		if checkseq is not None:
 			for ccheck in checkseq:
