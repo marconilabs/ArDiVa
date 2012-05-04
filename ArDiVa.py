@@ -16,6 +16,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with SANET. If not, see <http://www.gnu.org/licenses/>.
 
+
+# CHANGELOG
+#
+# 1.01 Added fillSafely to make easier to fill a new dict in compliance with a Model instance
+# 1.00 Basic structure and validation functions for Model and Process
+
+
 __author__ = 'Antonio Vaccarino'
 __docformat__ = 'restructuredtext en'
 
@@ -252,10 +259,10 @@ class Model (dict):
 		if newdefault in self.VAL_CODES:
 			self.default = newdefault
 		else:
-			self.default = None
+			self.default = self.VAL_STRICT
 
 
-	def evaluateCompliance (self, candidate, descriptor, strictness, override):
+	def evaluateCompliance (self, candidate, descriptor, strictness, override=False):
 		"""
 		Determines if the candidate value conforms to a value/condition defined by the descriptor parameter
 		:param candidate:
@@ -383,6 +390,88 @@ class Model (dict):
 
 
 		return True
+
+
+	def getAdaptedValue (self, candidate, valuelist):
+		"""
+		Compares an arbitrary candidate to a list of valid values and tries to convert it to the types available before comparing it
+		:param candidate:
+		:param valuelist:
+		:return: tuple, true/false and converted candidate/None
+		"""
+		validtypes = []
+		for value in valuelist:
+			if value.__class__ not in validtypes:
+				validtypes.append(type(value))
+
+		for ctype in validtypes:
+			try:
+				if ctype(candidate) in valuelist:
+					return True, ctype(candidate)
+			except:
+				pass
+
+		return False, None
+
+
+	def getUnpacked (self):
+		"""
+		Unpacks the multiple key descriptors to return an expanded dictionary and a table . Will SKIP re.compile keys
+		:return:
+		"""
+
+		#TODO: solve overlaps: we could have first (a,b) and then (b,a) as separate key descriptors
+
+		RE_TYPE = type(re.compile(""))
+
+		unpacked = {}
+		for key in self.keys:
+			if not isinstance(key, (tuple, RE_TYPE)):
+				unpacked[key] = self[key]
+			elif isinstance (key, tuple):
+				for subkey in key:
+					if not isinstance (key, RE_TYPE):
+						unpacked[subkey] = self[key]
+
+		return unpacked
+
+
+
+	def fillSafely (self, **kwargs):
+		"""
+		Fills a the Model dictionary with values for the specified keys. Note that this allows only for top-level insertions. There is no way to specify a multi-level key at the moment. Also, keys that allow a single possible value are auto-filled.
+		A partially compiled dict can be passed by putting it as **varname after all the named parameters
+		:param kwargs: key/value pairs
+		:return: tuple, True/False (new dictionary is compliant), content of generated dictionary
+		"""
+
+		generated = dict()
+		unpacked = self.getUnpacked()
+		modelkeys = unpacked.keys()
+
+		for key in modelkeys:
+			# fill with proposed value if possible
+			if kwargs.has_key (key):
+				#if not compliant we do NOT add it to the generated dict, all common key values must ALWAYS be compliant
+				if self.evaluateCompliance (kwargs[key], unpacked[key], self.default):
+					generated[key] = kwargs[key]
+				else:
+					#try to see if it's a "solvable" type issue
+					if isinstance(self[key], (tuple, list)):
+						adaptable, adapted = self.getAdaptedValue (kwargs[key], self[key])
+						if adaptable is True:
+							generated[key] = adapted
+			#autofill if there's only one alternative, but NOT if there was a proposed value; the caller should be aware the proposed value was wrong
+			elif isinstance(self[key], (tuple,list)) and len(self[key]) == 1:
+				generated[key] = self[key]
+			#else NOTHING, we do not add the key at all and will sort it out during self-validation. If the Model is validated as subset this will not be a problem
+
+		for key in kwargs.keys():
+			#will see later in self-validation if additional key/value pairs are allowed, would be ok for a superset
+			if key not in modelkeys:
+				generated[key] = kwargs[key]
+
+		return self.validateCandidate(generated), generated
 
 
 class Check:
@@ -534,3 +623,4 @@ class Process:
 		for testunit in self.validations:
 			results.append(testunit.applyTo(candidate, self.log))
 		return results
+
